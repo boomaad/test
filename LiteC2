@@ -1,0 +1,225 @@
+# Requirements Document
+
+## Introduction
+
+LiteC2 是一个轻量级的远程管理框架，采用现代技术栈重新实现。目标是保持专业的 UI 体验，同时大幅降低复杂度和资源占用。
+
+**技术栈选择：**
+- 服务端：Go + Gin + SQLite + WebSocket
+- CLI 客户端：C# / .NET 6+（优先开发，跨平台，预留接口供 Qt UI 复用）
+- UI 客户端：Qt / C++（后续开发）
+- Agent：Go（跨平台编译，优先支持 Windows）
+
+## Glossary
+
+- **Teamserver**: 中央服务器，负责管理所有 Agent 连接和客户端通信
+- **Agent**: 部署在目标机器上的轻量级程序，执行任务并回传结果
+- **Client**: 操作员使用的桌面客户端，用于管理 Agent 和下发任务
+- **Task**: 下发给 Agent 执行的命令或操作
+- **Listener**: 服务端监听器，接收 Agent 的连接请求
+- **Session**: Agent 与 Teamserver 之间的活跃连接
+
+## Requirements
+
+### Requirement 1: Teamserver 核心服务
+
+**User Story:** As an operator, I want to start a central server, so that I can manage all agents and clients from one place.
+
+#### Acceptance Criteria
+
+1. WHEN the Teamserver starts, THE Teamserver SHALL listen on a configurable HTTPS port with TLS encryption
+2. WHEN a configuration file is provided, THE Teamserver SHALL load settings from JSON profile
+3. WHEN the Teamserver starts, THE Teamserver SHALL initialize SQLite database for persistence
+4. WHEN the Teamserver receives a client connection, THE Teamserver SHALL authenticate using JWT tokens
+5. WHEN the Teamserver shuts down, THE Teamserver SHALL gracefully close all connections and save state
+6. IF an invalid configuration is provided, THEN THE Teamserver SHALL display a clear error message and exit
+
+### Requirement 2: Agent 连接管理
+
+**User Story:** As an operator, I want to see all connected agents in real-time, so that I can monitor and manage target machines.
+
+#### Acceptance Criteria
+
+1. WHEN an Agent connects for the first time, THE Teamserver SHALL register it with a unique ID and collect system information
+2. WHEN an Agent sends a heartbeat, THE Teamserver SHALL update its last-seen timestamp
+3. WHEN an Agent's heartbeat is missed beyond threshold, THE Teamserver SHALL mark it as inactive
+4. WHEN an Agent reconnects after disconnect, THE Teamserver SHALL restore its session state
+5. THE Teamserver SHALL broadcast Agent status changes to all connected Clients via WebSocket
+6. WHEN an operator requests Agent list, THE Teamserver SHALL return all Agents with their current status
+
+### Requirement 3: 任务下发与执行
+
+**User Story:** As an operator, I want to send commands to agents and see results, so that I can perform remote operations.
+
+#### Acceptance Criteria
+
+1. WHEN an operator submits a task, THE Teamserver SHALL queue it for the target Agent
+2. WHEN an Agent polls for tasks, THE Teamserver SHALL return all pending tasks for that Agent
+3. WHEN an Agent completes a task, THE Teamserver SHALL store the result and notify the Client
+4. WHEN a task is created, THE Teamserver SHALL assign a unique task ID and timestamp
+5. IF a task fails on the Agent, THEN THE Teamserver SHALL record the error message and status
+6. WHEN an operator cancels a pending task, THE Teamserver SHALL remove it from the queue
+
+### Requirement 4: 文件传输
+
+**User Story:** As an operator, I want to upload and download files to/from agents, so that I can transfer tools and retrieve data.
+
+#### Acceptance Criteria
+
+1. WHEN an operator initiates a file download from Agent, THE Teamserver SHALL create a download task and track progress
+2. WHEN file chunks are received, THE Teamserver SHALL assemble them and update progress percentage
+3. WHEN a download completes, THE Teamserver SHALL save the file locally and notify the Client
+4. WHEN an operator uploads a file to Agent, THE Teamserver SHALL chunk and queue it for transfer
+5. IF a file transfer is interrupted, THEN THE Teamserver SHALL mark it as failed and allow retry
+6. THE Teamserver SHALL enforce maximum file size limits configurable in profile
+
+### Requirement 5: 客户端认证与同步
+
+**User Story:** As an operator, I want to securely login and see real-time updates, so that I can collaborate with team members.
+
+#### Acceptance Criteria
+
+1. WHEN a Client connects, THE Teamserver SHALL require username and password authentication
+2. WHEN authentication succeeds, THE Teamserver SHALL issue JWT access and refresh tokens
+3. WHEN a Client establishes WebSocket connection, THE Teamserver SHALL sync all current state (Agents, Tasks, Downloads)
+4. WHEN state changes occur, THE Teamserver SHALL broadcast updates to all connected Clients
+5. WHEN a Client disconnects, THE Teamserver SHALL clean up its session resources
+6. IF authentication fails, THEN THE Teamserver SHALL return 401 error and log the attempt
+
+### Requirement 6: CLI 客户端 (C#)
+
+**User Story:** As an operator, I want a command-line client, so that I can manage operations efficiently and script automation.
+
+#### Acceptance Criteria
+
+1. WHEN the CLI starts with login command, THE CLI SHALL authenticate and store tokens locally
+2. WHEN the CLI runs agents command, THE CLI SHALL display all agents in formatted table
+3. WHEN the CLI runs shell command for an agent, THE CLI SHALL create task and display output when complete
+4. WHEN the CLI runs download command, THE CLI SHALL initiate download and show progress
+5. WHEN the CLI runs upload command, THE CLI SHALL chunk file and upload with progress
+6. WHEN the CLI enters interactive mode, THE CLI SHALL provide agent selection and command prompt
+7. THE CLI SHALL support configuration file for server URL and credentials
+8. IF server connection fails, THEN THE CLI SHALL display clear error and retry options
+9. THE CLI SHALL be built with .NET 6+ for cross-platform support (Windows, Linux, macOS)
+
+### Requirement 7: 客户端接口抽象
+
+**User Story:** As a developer, I want well-defined client interfaces, so that I can build different client implementations (CLI, Web UI, Desktop UI).
+
+#### Acceptance Criteria
+
+1. THE Client API interface SHALL define methods for authentication, agent management, task management, and file transfer
+2. THE Client API interface SHALL be implementation-agnostic (usable by CLI, Web, Desktop)
+3. THE WebSocket interface SHALL define methods for real-time state synchronization
+4. WHEN implementing a new client, THE developer SHALL only need to implement the defined interfaces
+5. THE interfaces SHALL use standard data types that can be serialized to JSON
+
+### Requirement 8: Agent 实现
+
+**User Story:** As an operator, I want a lightweight agent that runs on Windows, so that I can deploy it on target machines.
+
+#### Acceptance Criteria
+
+1. WHEN the Agent starts, THE Agent SHALL connect to configured Teamserver via HTTPS
+2. WHEN connected, THE Agent SHALL send initial registration with system info (hostname, username, OS, IP, process)
+3. WHILE connected, THE Agent SHALL poll for tasks at configurable intervals (sleep/jitter)
+4. WHEN a shell command task is received, THE Agent SHALL execute it and return output
+5. WHEN a file download task is received, THE Agent SHALL read and send file in chunks
+6. WHEN a file upload task is received, THE Agent SHALL receive chunks and write to disk
+7. IF connection fails, THEN THE Agent SHALL retry with exponential backoff
+8. THE Agent SHALL compile to a single executable under 5MB for Windows
+
+### Requirement 9: 配置与持久化
+
+**User Story:** As an operator, I want server state to persist across restarts, so that I don't lose operational data.
+
+#### Acceptance Criteria
+
+1. WHEN the Teamserver starts, THE Teamserver SHALL restore Agents, Tasks, and Downloads from database
+2. WHEN an Agent is created or updated, THE Teamserver SHALL persist changes to database
+3. WHEN a Task completes, THE Teamserver SHALL store its result in database
+4. WHEN a Download completes, THE Teamserver SHALL record file metadata in database
+5. THE Teamserver SHALL use SQLite for storage, requiring no external database setup
+6. WHEN parsing configuration, THE Teamserver SHALL validate all required fields and report errors
+
+### Requirement 10: 安全性
+
+**User Story:** As an operator, I want secure communications, so that operations remain confidential.
+
+#### Acceptance Criteria
+
+1. THE Teamserver SHALL require TLS certificates for all HTTPS connections
+2. THE Teamserver SHALL hash passwords using SHA256 before comparison
+3. THE Teamserver SHALL validate JWT tokens on every API request
+4. THE Agent SHALL verify Teamserver certificate (configurable to allow self-signed)
+5. IF an invalid token is provided, THEN THE Teamserver SHALL reject the request with 401 status
+6. THE Teamserver SHALL support configurable token expiration times
+
+
+### Requirement 11: Agent 生成器
+
+**User Story:** As an operator, I want to generate customized agents with embedded configuration, so that I can deploy them without manual configuration.
+
+#### Acceptance Criteria
+
+1. WHEN an operator requests agent generation, THE Teamserver SHALL create a configured agent binary
+2. WHEN generating an agent, THE Teamserver SHALL embed server URL, communication profile, and encryption keys
+3. THE Generator SHALL support output formats: raw executable, shellcode (optional)
+4. THE Generator SHALL support target platforms: Windows (x64, x86)
+5. WHEN generating, THE Teamserver SHALL allow customization of sleep interval, jitter, and kill date
+6. THE generated agent SHALL have unique identifiers to distinguish deployments
+7. IF generation fails, THEN THE Teamserver SHALL return detailed error information
+
+### Requirement 12: 通信加密
+
+**User Story:** As an operator, I want encrypted communications between agent and server, so that traffic cannot be easily inspected.
+
+#### Acceptance Criteria
+
+1. WHEN an Agent registers, THE Agent and Teamserver SHALL perform key exchange to establish session key
+2. WHEN sending task data, THE Agent SHALL encrypt payload using AES-256-GCM with session key
+3. WHEN receiving task results, THE Teamserver SHALL decrypt payload using session key
+4. THE encryption layer SHALL operate independently of TLS (defense in depth)
+5. WHEN session key is compromised, THE Teamserver SHALL support key rotation
+6. THE Agent SHALL store session key securely in memory (not on disk)
+
+### Requirement 13: 流量伪装 (Communication Profile)
+
+**User Story:** As an operator, I want agent traffic to blend with normal web traffic, so that it evades basic detection.
+
+#### Acceptance Criteria
+
+1. THE Teamserver SHALL support configurable HTTP profiles defining request/response characteristics
+2. WHEN an Agent communicates, THE Agent SHALL use profile-defined User-Agent, headers, and URI patterns
+3. THE Profile SHALL support configurable HTTP methods (GET, POST) and content types
+4. WHEN responding to non-agent requests, THE Teamserver SHALL return profile-defined decoy page
+5. THE Profile SHALL support request/response data transformation (base64, custom encoding)
+6. WHEN loading profile, THE Teamserver SHALL validate all required fields
+
+### Requirement 14: Agent 自毁机制
+
+**User Story:** As an operator, I want agents to self-terminate under certain conditions, so that I can limit exposure.
+
+#### Acceptance Criteria
+
+1. WHEN kill date is reached, THE Agent SHALL terminate itself and clean up
+2. WHEN a terminate command is received, THE Agent SHALL exit immediately
+3. THE Agent SHALL support configurable maximum failed connection attempts before self-termination
+4. WHEN self-terminating, THE Agent SHALL attempt to remove traces (configurable)
+5. THE Teamserver SHALL be able to set kill date during agent generation or via command
+
+### Requirement 15: 代理支持
+
+**User Story:** As an operator, I want agents to connect through proxy servers, so that I can operate in restricted network environments.
+
+#### Acceptance Criteria
+
+1. WHEN generating an agent, THE Generator SHALL support embedding proxy configuration
+2. THE Agent SHALL support SOCKS4 proxy protocol for TCP connections
+3. THE Agent SHALL support SOCKS5 proxy protocol with optional authentication
+4. THE Agent SHALL support HTTP proxy protocol with CONNECT method
+5. WHEN proxy is configured, THE Agent SHALL route all C2 traffic through the proxy
+6. WHEN proxy authentication is required, THE Agent SHALL use configured credentials
+7. IF proxy connection fails, THEN THE Agent SHALL retry with exponential backoff
+8. THE CLI SHALL support specifying proxy settings during agent generation (-proxy flag)
+9. THE proxy configuration format SHALL be: `<type>://[user:pass@]host:port` (e.g., `socks5://127.0.0.1:1080`)
